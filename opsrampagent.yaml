@@ -144,7 +144,9 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "250m"
-            volumeMounts:
+          securityContext:
+            privileged: true
+          volumeMounts:
             - name: dockersocket
               mountPath: /var/run/docker.sock
               readOnly: true
