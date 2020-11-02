@@ -1,0 +1,280 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: opsramp-agent
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: opsrampagentcr
+rules:
+  - nonResourceURLs:
+      - "/version"
+      - "/healthz"
+      - "/metrics"
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources:
+      - "nodes"
+      - "daemonsets"
+      - "deployments"
+      - "services"
+      - "events"
+      - "configmaps"
+      - "pods"
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources:
+      - "pods"
+      - "pods/exec"
+    verbs: ["get", "list", "create"]
+  - apiGroups: [""] # For Schdeuler, controller and Api Metrics collection
+    resources:
+      - "pods/proxy"
+      - "nodes/proxy"
+      - "pods/metrics"
+      - "nodes/metrics"
+    verbs: ["get"]
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: agent-updater
+rules:
+  - apiGroups: ["*"]
+    resources: ["pods", "daemonsets", "deployments"]
+    verbs: ["create", "delete", "get", "update"]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: opsrampagent
+  namespace: opsramp-agent
+automountServiceAccountToken: true
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: opsrampagentupdate
+  namespace: opsramp-agent
+automountServiceAccountToken: true
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: opsrampagentrb
+subjects:
+  - kind: ServiceAccount
+    name: opsrampagent
+    namespace: opsramp-agent
+roleRef:
+  kind: ClusterRole
+  name: opsrampagentcr
+  apiGroup: rbac.authorization.k8s.io
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: agentupdaterb
+subjects:
+  - kind: ServiceAccount
+    name: opsrampagentupdate
+    namespace: opsramp-agent
+roleRef:
+  kind: ClusterRole
+  name: agent-updater
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+# Kubernetes Versions after 1.9.0 should use apps/v1
+# Kubernetes Versions before 1.8.0 should use extensions/v1beta1 or apps/v1beta1
+kind: DaemonSet
+metadata:
+  name: opsramp-agent-worker
+  namespace: opsramp-agent
+spec:
+  updateStrategy:
+    type: RollingUpdate
+  minReadySeconds: 10
+  selector:
+    matchLabels:
+      name: opsramp-agent-worker
+  template:
+    metadata:
+      labels:
+        name: opsramp-agent-worker
+    spec:
+      hostNetwork: true
+      hostPID: true
+      tolerations:
+        - key: node-role.kubernetes.io/master
+          effect: NoSchedule
+      containers:
+        - image: opsramp/agent
+          imagePullPolicy: Always
+          name: opsramp-agent
+          terminationMessagePath: /dev/termination-log
+          env:
+            - name: AGENT_API_KEY
+              value: "YprtWy429jCGR4zc5eggT2tPV7sB9by5"
+            - name: AGENT_API_SECRET
+              value: "bcDPZpCDHzk292yesnkEwetq3YGbFb9FXxunAanVBV8mAj979xJHYRcznSVc8Z8p"
+            - name: INTEGRATION_RES_UUID
+              value: "d227d0af-55e0-4473-9631-5ef3db705274"
+            - name: APP_SERVER
+              value: "api.vistara.io"
+            - name: CLIENT_ID
+              value: "client_709034"
+            - name: LOG_LEVEL
+              value: "warn"
+            - name: K8SAGENT
+              value: "TRUE"
+            - name: DOCKER_EVENTS
+              value: "FALSE"
+            - name: KUBERNETES_TYPE
+              value: "K8S"
+            - name: CONTAINER_ENGINE
+              value: "Docker"
+            - name: AUTO_MONITOR
+              value: "FALSE"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "250m"
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: dockersocket
+              mountPath: /var/run/docker.sock
+              readOnly: true
+            - name: procdir
+              mountPath: /host/proc
+              readOnly: true
+            - name: cgroups
+              mountPath: /host/sys/fs/cgroup
+              readOnly: true
+            - name: mounts
+              mountPath: /host/mnt
+              readOnly: true
+      volumes:
+        - name: dockersocket
+          hostPath:
+            path: /var/run/docker.sock
+        - name: procdir
+          hostPath:
+            path: /proc
+        - name: cgroups
+          hostPath:
+            path: /sys/fs/cgroup
+        - name: mounts
+          hostPath:
+            path: /mnt
+      serviceAccount: opsrampagent
+      terminationGracePeriodSeconds: 10
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opsramp-agent-master
+  namespace: opsramp-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opsramp-k8s-agent
+  strategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: opsramp-k8s-agent
+    spec:
+      containers:
+        - name: contosogcpk8-opsramp-k8s-agent
+          image: opsramp/agent
+          imagePullPolicy: Always
+          env:
+            - name: AGENT_API_KEY
+              value: "YprtWy429jCGR4zc5eggT2tPV7sB9by5"
+            - name: AGENT_API_SECRET
+              value: "bcDPZpCDHzk292yesnkEwetq3YGbFb9FXxunAanVBV8mAj979xJHYRcznSVc8Z8p"
+            - name: APP_SERVER
+              value: "api.vistara.io"
+            - name: CLIENT_ID
+              value: "client_709034"
+            - name: LOG_LEVEL
+              value: "warn"
+            - name: K8SAGENT_MASTER
+              value: "TRUE"
+            - name: MASTER_UUID
+              value: "INTG-e4361b64-564f-4792-9e1e-ceee8f50d4d2"
+            - name: INTEGRATION_RES_UUID
+              value: "d227d0af-55e0-4473-9631-5ef3db705274"
+            - name: K8S_EVENTS
+              value: "FALSE"
+            - name: KUBERNETES_TYPE
+              value: "K8S"
+            - name: CONTAINER_ENGINE
+              value: "Docker"
+            - name: AUTO_MONITOR
+              value: "FALSE"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "250m"
+      serviceAccount: opsrampagent
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kube-events
+  labels:
+    name: kube-events
+  namespace: opsramp-agent
+data:
+  eventsConfig.yaml: |
+    node:
+    - RegisteredNode
+    - RemovingNode
+    - DeletingNode
+    - TerminatingEvictedPod
+    - NodeReady
+    - NodeNotReady
+    - NodeSchedulable
+    - NodeNotSchedulable
+    - CIDRNotAvailable
+    - CIDRAssignmentFailed
+    - Starting
+    - KubeletSetupFailed
+    - FailedMount
+    - NodeSelectorMismatching
+    - InsufficientFreeCPU
+    - InsufficientFreeMemory
+    - OutOfDisk
+    - HostNetworkNotSupported
+    - NilShaper
+    - Rebooted
+    - NodeHasSufficientDisk
+    - NodeOutOfDisk
+    - InvalidDiskCapacity
+    - FreeDiskSpaceFailed
+    pod:
+    - Failed
+    - InspectFailed
+    - ErrImageNeverPull
+    - Killing
+    - OutOfDisk
+    - HostPortConflict
+    other:
+    - FailedBinding
+    - FailedScheduling
+    - SuccessfulCreate
+    - FailedCreate
+    - SuccessfulDelete
+    - FailedDelete
